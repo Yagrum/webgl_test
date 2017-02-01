@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>BasicGL</title>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+        <script type="text/javascript" src="fpsCalculator.js"></script>
+        <script type="text/javascript" src="geometry.js"></script>
+        <script type="text/javascript" src="input.js"></script>
+
+        <script type="text/javascript" src="gameObject.js"></script>
+        <script type="text/javascript" src="player.js"></script>
+
+        <script type="text/javascript" src="floor.js"></script>
+        <script type="text/javascript" src="goHandler.js"></script>
+
+        <script type="text/javascript" src="model.js"></script>
+        <script type="text/javascript" src="gl-matrix-min.js"></script>
+        <script type="text/javascript" src="renderer.js"></script>
+        <script type="text/javascript" src="glsl.js"></script>
+        <script type="text/javascript" src="camera.js"></script>
+        <script type="text/javascript" src="resourceLoader.js"></script>
+        <script type="text/javascript">
+
+            "use strict";
+            let gameLoopDelay = 40;
+
+            let fps;
+            let tickP;
+            let fpsP;
+            let debugP;
+            let canvas;
+
+            let renderer, camera, glsl, resourceLoader, dataFetcher, dataStorage;
+
+            let goHandler;
+            let modelHandler;
+            let input;
+
+            function setUpElements()
+            {
+                //Removes the element telling user js is necessary
+                document.getElementById("body").removeChild(document.getElementById("jsEnabled"));
+
+                //Creates tick count and fps count display elements
+                tickP = document.createElement("p");
+                document.body.appendChild(tickP);
+                fpsP = document.createElement("p");
+                document.body.appendChild(fpsP);
+
+                //Creates the canvas for gl drawing
+                canvas = document.createElement("CANVAS");
+                canvas.width = 1024;
+                canvas.height = 576;
+                document.body.appendChild(canvas);
+
+                debugP = document.createElement("p");
+                document.body.appendChild(debugP);
+            }
+
+            function render()
+            {
+                renderer.clear();
+
+                let GOs = goHandler.getAll();
+                for(let ea in GOs)
+                {
+                  GOs[ea].render();
+                }
+
+                fps.update();
+                requestAnimationFrame(render);
+            }
+
+            var Tickscount = 0;
+            var TickstimeStart = 0;
+            function tickCounter()
+            {
+          		var TickstimeNow = new Date().getTime();
+          		if(TickstimeStart !== 0){
+                              var elapsed = TickstimeNow - TickstimeStart;
+                              if(elapsed >= 1000){
+                                  tickP.innerHTML = "Ticks: " + Tickscount;
+                                  Tickscount = 0;
+                                  TickstimeStart = TickstimeNow;
+                              }else{
+                                  Tickscount++;
+                              }
+          		}else{
+                              TickstimeStart = new Date().getTime();
+          		}
+            }
+
+            function gameLoop(){
+                tickCounter();
+
+                //input.gpUpdate();
+
+                let GOs = goHandler.getAll();
+                for(let ea in GOs)
+                {
+                  GOs[ea].update();
+                }
+
+                setTimeout(gameLoop, gameLoopDelay);
+            }
+
+            //MAIN
+            function main()
+            {
+                setUpElements();
+                fps = new FPSCalculator(fpsP);
+
+                //Setup Input
+                input = new Input();
+
+                //Setup renderer
+                camera = new Camera();
+                renderer = new Renderer(canvas);
+
+                renderer.initWebGL();
+                glsl = new GLSL(renderer.GL());
+
+                //Setup GOHandler
+                goHandler = new GOHandler();
+
+                //Load in data
+                dataFetcher = new DataFetcher();
+                dataStorage = new DataStorage();
+                Promise.all([
+                  dataFetcher.loadOBJ("cube", "cube.obj"),
+                  dataFetcher.loadOBJ("plane", "plane.obj"),
+                  dataFetcher.loadTexture("person", "image.png"),
+                  dataFetcher.loadTexture("bricks", "image2.png"),
+                  dataFetcher.loadShader("default-fs", "default-shader.fs", "fs"),
+                  dataFetcher.loadShader("default-vs", "default-shader.vs", "vs"),
+                  dataFetcher.loadShader("untextured-fs", "untextured-shader.fs", "fs"),
+                  dataFetcher.loadShader("untextured-vs", "untextured-shader.vs", "vs")
+                ]).then((data) => {
+                  dataStorage.storeAll(data);
+                  let models = ["cube", "plane"];
+                  let textures = ["person", "bricks"];
+                  let itValue;
+                  //Initialize the shader programs
+                  glsl.initShaders( "textured" ,dataStorage.getShaderData("default-vs"), dataStorage.getShaderData("default-fs"));
+                  glsl.initShaders( "untextured" ,dataStorage.getShaderData("untextured-vs"), dataStorage.getShaderData("untextured-fs"));
+
+                  //Set the attributes for the shader program
+                  renderer.getAttribLocations("textured");
+                  renderer.getUniformLocations("textured");
+                  renderer.getAttribLocations("untextured");
+                  renderer.getUniformLocations("untextured");
+
+                  //Load in the textures and models into the renderer
+                  for(let ea in textures){
+                    itValue = dataStorage.getTextureData(textures[ea]);
+                    renderer.storeTexture(itValue.id(), itValue.image());
+                  }
+                  for(let ea in models){
+                    itValue = dataStorage.getModelData(models[ea]);
+                    console.log(itValue.indices());
+                    renderer.storeModel(itValue.id(), itValue.vertices(), itValue.indices(), itValue.UVs());
+                  }
+
+                  //Move on to setup game
+                  game();
+                }).catch(error => {console.log(error)});
+            }
+
+            function game()
+            {
+              renderer.setPerspectiveMatrix(45, 1024.0/576.0, 0.1, 100.0);
+              camera.focusOn(vec3.fromValues(0.0, 0.0, 20.0), vec3.fromValues(0.0, 0.0, 0.0), vec3.fromValues(0.0, 1.0, 0.0));
+              camera.rotate(45, vec3.fromValues(1.0, 0.0, 0.0));
+
+              goHandler.add(new Player(0.0, 0.0, 0.0, true, "cube", "person", false, "textured"));
+              let floorGO = goHandler.add(new Floor(0.0, -1.0, 0.0, false, "plane", "bricks", false, "textured"));
+
+              goHandler.getByID(floorGO).scale(vec3.fromValues(15.0, 0.0, 15.0));
+
+              render();
+              gameLoop();
+            }
+
+        </script>
+    </head>
+    <body id="body" onload="main();">
+      <p id="jsEnabled">JavaScript must be enabled for content to work.</p>
+    </body>
+</html>
